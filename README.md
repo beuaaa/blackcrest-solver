@@ -111,7 +111,7 @@ No build step: serve the folder over HTTPS (Nginx, Apache, GitHub Pages…). The
 <details>
 <summary><b>🇫🇷 En français</b></summary>
 
-**Blackcrest Solver** est un outil gratuit pour le **Décodeur** de l'événement **Blackcrest** d'*Asphalt Legends*. À chaque coup, il indique la case à ouvrir pour trouver les 3 récompenses d'un panneau avec le moins de décodeurs possible : environ **10 décodeurs par panneau** en moyenne, mesurés sur 1 200 panneaux simulés.
+**Blackcrest Solver** est un outil gratuit pour optimiser la découverte des récompenses de l'événement **Blackcrest** d'*Asphalt Legends*. À chaque coup, il indique la case à ouvrir pour trouver les 3 récompenses d'un panneau avec le moins de décodeurs possible : environ **10 décodeurs par panneau** en moyenne, mesurés sur 1 200 panneaux simulés.
 
 👉 **[blackcrest.gauntlet-manager.com](https://blackcrest.gauntlet-manager.com/)**
 
