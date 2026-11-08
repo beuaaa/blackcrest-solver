@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Blackcrest Solver</title>
+<script>
+// Adresse officielle de l'outil : https://blackcrest.gauntlet-manager.com/
+// (le serveur Nginx ne fait pas ces redirections, la page s'en charge)
+(() => {
+  const h = location.hostname.toLowerCase();
+  if (h === "gauntlet-manager.com" || h === "www.gauntlet-manager.com") location.replace("https://blackcrest.gauntlet-manager.com/");
+  else if (h === "blackcrest.gauntlet-manager.com" && location.protocol === "http:") location.replace("https://" + location.host + location.pathname);
+})();
+</script>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0e0d0b">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Blackcrest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout : une console de jeu sombre — plateau en haut, panneau « prochain clic » dessous, commandes en bas. Thème unique, sombre, voulu. */
+:root {
+  --bg: #0e0d0b;
+  --panel: #181612;
+  --frame: #24211b;
+  --frame-line: #36322a;
+  --ink: #f1ead8;
+  --muted: #a39a85;
+  --gold: #e9c46a;
+  --gold-deep: #4d4128;
+  --amber: #f5a623;
+  --cyan: #2fe0f5;
+  --gift: #2e8b4a;
+  --alert: #ffb300;
+  --danger: #ff7a5c;
+  --display: "Chakra Petch", "Rajdhani", "Arial Narrow", sans-serif;
+  --body: "Barlow", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.45;
+}
+.wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding-block: 20px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 16px;
+}
+header { display: flex; flex-direction: column; gap: 10px; }
+.head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h1 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(1.5rem, 4vw, 2.1rem);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--gold);
+  text-wrap: balance;
+}
+h1 span { color: var(--muted); font-weight: 500; letter-spacing: .08em; }
+.brand { display: grid; gap: 2px; }
+.version { font-family: var(--display); font-size: .75rem; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.steps { display: flex; gap: 6px; font-family: var(--display); font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; }
+.steps b { padding: 4px 10px; border: 1px solid var(--frame-line); color: var(--muted); font-weight: 600; }
+.steps b.on { border-color: var(--gold); color: var(--gold); }
+
+.board {
+  background: radial-gradient(ellipse at 50% 40%, #1d1a14 0%, var(--bg) 75%);
+  border: 1px solid var(--frame-line);
+  padding: 6px;
+}
+.board svg { display: block; width: 100%; height: auto; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.cell { cursor: pointer; }
+.cell:focus { outline: none; }
+.cell:focus-visible .inner { stroke: var(--cyan); stroke-width: 4; }
+.cell.locked { cursor: default; }
+.lbl { font-family: var(--display); font-size: 11px; font-weight: 600; letter-spacing: .04em; pointer-events: none; }
+.pct { font-family: var(--display); font-size: 17px; font-weight: 700; pointer-events: none; }
+.target { fill: none; stroke: var(--cyan); stroke-width: 5; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { stroke-opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .target { animation: none; } }
+
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--frame-line);
+  border-left: 3px solid var(--gold);
+  padding: 16px 18px;
+  display: grid;
+  gap: 10px;
+}
+.panel.error { border-left-color: var(--danger); }
+.help .warn { color: var(--danger); }
+.ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+.ask button { padding: 8px 14px; font-size: .85rem; }
+.ask button.on { border-color: var(--alert); color: var(--alert); box-shadow: 0 0 0 1px var(--alert); }
+.ios-hint { margin: 0; color: var(--muted); font-size: .9rem; }
+.panel.done { border-left-color: var(--gift); }
+.kicker { font-family: var(--display); font-size: .78rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.headline { font-family: var(--display); font-weight: 700; font-size: clamp(1.25rem, 3.6vw, 1.7rem); line-height: 1.2; color: var(--ink); text-wrap: balance; }
+.headline em { font-style: normal; color: var(--cyan); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-family: var(--display); font-size: .85rem; font-weight: 600; padding: 4px 10px; background: var(--frame); border: 1px solid var(--frame-line); font-variant-numeric: tabular-nums; }
+.chip b { color: var(--gold); font-weight: 700; }
+.help { color: var(--muted); margin: 0; max-width: 68ch; }
+.help strong { color: var(--ink); font-weight: 600; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+button {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: .95rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 10px 18px;
+  background: var(--frame);
+  color: var(--ink);
+  border: 1px solid var(--frame-line);
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--gold); }
+button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+button.primary { background: var(--gold); color: #1a1408; border-color: var(--gold); }
+button:disabled { opacity: .4; cursor: default; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 14px 20px; color: var(--muted); font-size: .9rem; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend svg { width: 22px; height: 22px; flex: none; }
+/* Texte 3D « Bravo » : ombres empilées qui donnent l'épaisseur des lettres */
+.board { position: relative; }
+.bravo { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; padding: 0 16px; background: radial-gradient(ellipse at center, rgba(14, 13, 11, .55), rgba(14, 13, 11, .88)); perspective: 600px; }
+.bravo span {
+  font-family: var(--display); font-weight: 700; text-align: center; text-transform: uppercase; letter-spacing: .04em;
+  font-size: clamp(1.3rem, 5.4vw, 3.1rem); line-height: 1.15; color: #fbe6a2; text-wrap: balance;
+  text-shadow: 0 1px 0 #e2bf5c, 0 2px 0 #d8b351, 0 3px 0 #cda747, 0 4px 0 #c29b3d, 0 5px 0 #b58f33, 0 6px 0 #a8832a,
+    0 7px 1px rgba(0, 0, 0, .3), 0 0 5px rgba(0, 0, 0, .25), 0 1px 3px rgba(0, 0, 0, .45), 0 3px 5px rgba(0, 0, 0, .35),
+    0 5px 10px rgba(0, 0, 0, .4), 0 10px 10px rgba(0, 0, 0, .3), 0 20px 20px rgba(0, 0, 0, .3);
+  animation: bravoIn 750ms cubic-bezier(.2, 1.4, .4, 1) both;
+}
+.bravo small { position: absolute; left: 12px; right: 12px; bottom: 10px; text-align: center; font-size: .8rem; line-height: 1.3; color: var(--ink); opacity: .85; text-wrap: balance; }
+@keyframes bravoIn { from { opacity: 0; transform: scale(.35) rotateX(65deg); } to { opacity: 1; transform: none; } }
+/* Statistique */
+.stats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--muted); font-size: .95rem; border-top: 1px solid var(--frame-line); padding-top: 12px; }
+.stats b { color: var(--gold); font-family: var(--display); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.stats button { padding: 6px 12px; font-size: .8rem; }
+/* Démonstrations du tutoriel */
+.tut-demo { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
+.tut-demo li { color: var(--muted); transition: color .2s; }
+.tut-demo li.on { color: var(--ink); font-weight: 600; }
+.tap-ripple { fill: rgba(47, 224, 245, .25); stroke: var(--cyan); stroke-width: 3; pointer-events: none; transform-box: fill-box; transform-origin: center; animation: tapRipple .7s ease-out both; }
+@keyframes tapRipple { from { opacity: 1; transform: scale(.4); } to { opacity: 0; transform: scale(1.6); } }
+.tut-press { border-color: var(--cyan) !important; outline: 2px solid var(--cyan); outline-offset: 2px; color: var(--ink) !important; box-shadow: 0 0 0 3px rgba(47, 224, 245, .45); transform: scale(.96); }
+@media (prefers-reduced-motion: reduce) { .bravo span, .tap-ripple { animation: none; } }
+.langs { display: flex; gap: 8px; flex: none; }
+#install { margin-left: auto; }
+button.flag { padding: 6px; line-height: 0; }
+button.flag svg { width: 34px; height: 22px; display: block; }
+button.flag[aria-pressed="true"] { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+button.flag[aria-pressed="false"] svg { opacity: .55; }
+button.flag:hover svg { opacity: 1; }
+.help-btn { width: 36px; height: 36px; padding: 0; font-size: 1.1rem; font-weight: 700; color: var(--gold); }
+/* Tutoriel */
+#tuto { position: fixed; inset: 0; z-index: 50; }
+.tut-shade { position: fixed; inset: 0; background: rgba(0, 0, 0, .66); }
+.tut-spot { position: fixed; border: 2px solid var(--gold); box-shadow: 0 0 0 9999px rgba(0, 0, 0, .66); pointer-events: none; transition: left .25s, top .25s, width .25s, height .25s; }
+.tut-card {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 24px); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--frame-line); border-top: 3px solid var(--gold);
+  padding: 16px 18px; display: grid; gap: 10px; box-sizing: border-box;
+}
+.tut-card.centered { top: 50%; transform: translate(-50%, -50%); }
+.tut-card:focus { outline: none; }
+.tut-count { font-family: var(--display); font-size: .75rem; letter-spacing: .14em; color: var(--muted); }
+.tut-card h2 { margin: 0; font-family: var(--display); font-size: 1.3rem; line-height: 1.2; color: var(--ink); text-wrap: balance; }
+.tut-body { display: grid; gap: 8px; color: var(--muted); }
+.tut-body p { margin: 0; }
+.tut-body .tut-list-title { color: var(--ink); font-weight: 600; }
+.tut-body ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.tut-body li { display: flex; gap: 10px; align-items: baseline; color: var(--ink); }
+.tut-ver { flex: none; font-family: var(--display); font-size: .75rem; font-weight: 700; color: var(--gold); border: 1px solid var(--frame-line); padding: 1px 6px; }
+.tut-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tut-gap { flex: 1; }
+.tut-actions button { padding: 8px 14px; font-size: .85rem; }
+.tut-actions .tut-skip { background: transparent; border-color: transparent; color: var(--muted); padding-left: 0; }
+@media (prefers-reduced-motion: reduce) { .tut-spot { transition: none; } }
+/* petits écrans : titre, aide et drapeaux tiennent sur une ligne */
+@media (max-width: 480px) {
+  h1 { font-size: 1.35rem; letter-spacing: .1em; }
+  .langs { gap: 6px; }
+  button.flag { padding: 5px; }
+  button.flag svg { width: 26px; height: 17px; }
+  .help-btn { width: 31px; height: 31px; }
+}
+@media (max-width: 380px) {
+  h1 { font-size: 1.12rem; letter-spacing: .07em; }
+  .head-row { gap: 8px; }
+  .langs { gap: 4px; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="head-row">
+    <div class="brand">
+      <h1>Blackcrest</h1>
+      <div class="version" id="version"></div>
+    </div>
+      <div class="langs" role="group" data-i18n-aria="lang">
+        <button type="button" id="helpBtn" class="help-btn">?</button>
+        <button class="flag" data-lang="fr" aria-label="Français" title="Français"><svg viewBox="0 0 3 2"><rect width="1" height="2" fill="#002654"/><rect x="1" width="1" height="2" fill="#fff"/><rect x="2" width="1" height="2" fill="#ce1126"/></svg></button>
+        <button class="flag" data-lang="es" aria-label="Español" title="Español"><svg viewBox="0 0 3 2"><rect width="3" height="2" fill="#aa151b"/><rect y=".5" width="3" height="1" fill="#f1bf00"/></svg></button>
+        <button class="flag" data-lang="en" aria-label="English" title="English"><svg viewBox="0 0 60 30"><clipPath id="uk-clip"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath><rect width="60" height="30" fill="#012169"/><path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/><path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#uk-clip)" stroke="#c8102e" stroke-width="4"/><path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/><path d="M30,0 v30 M0,15 h60" stroke="#c8102e" stroke-width="6"/></svg></button>
+    </div>
+    </div>
+    <div class="steps" data-i18n-aria="steps">
+      <b id="step1" class="on" data-i18n="step1">1 · Cases ✕</b>
+      <b id="step2" data-i18n="step2">2 · Recherche</b>
+    </div>
+  </header>
+
+  <div class="board">
+    <svg id="board" viewBox="0 0 868 436" role="grid" data-i18n-aria="grid"></svg>
+  </div>
+
+  <section class="panel" id="panel" aria-live="polite">
+    <div class="kicker" id="kicker"></div>
+    <div class="headline" id="headline"></div>
+    <div class="chips" id="chips"></div>
+    <p class="help" id="help"></p>
+  </section>
+
+  <div class="controls">
+    <button id="start" class="primary" data-i18n="start">Commencer</button>
+    <button id="undo" data-i18n="undo">Annuler</button>
+    <button id="reset" data-i18n="reset">Recommencer</button>
+    <button id="install" data-i18n="install" hidden>Installer</button>
+  </div>
+
+  <p class="ios-hint" id="iosHint" data-i18n="iosHint" hidden></p>
+
+  <div class="legend" data-i18n-aria="legend">
+    <span><svg viewBox="-24 -24 48 48"><polygon points="0,-20 17.3,-10 17.3,10 0,20 -17.3,10 -17.3,-10" fill="#e9c46a" stroke="#f5a623" stroke-width="3"/></svg><span data-i18n="lgGold">Case dorée : % = chance d'une récompense</span></span>
+    <span><svg viewBox="-24 -24 48 48"><polygon points="0,-20 17.3,-10 17.3,10 0,20 -17.3,10 -17.3,-10" fill="#0a0a09" stroke="#57534a" stroke-width="3"/></svg><span data-i18n="lgEmpty">Vide</span></span>
+    <span><svg viewBox="-24 -24 48 48"><polygon points="0,-20 17.3,-10 17.3,10 0,20 -17.3,10 -17.3,-10" fill="#0a0a09" stroke="#ffb300" stroke-width="3"/><text y="8" text-anchor="middle" fill="#ffb300" font-size="22" font-weight="700">!</text></svg><span data-i18n="lgAlert">Récompense dans une case voisine</span></span>
+    <span><svg viewBox="-24 -24 48 48"><polygon points="0,-20 17.3,-10 17.3,10 0,20 -17.3,10 -17.3,-10" fill="#2e8b4a" stroke="#7dffa0" stroke-width="3"/></svg><span data-i18n="lgGift">Récompense</span></span>
+    <span><svg viewBox="-24 -24 48 48"><polygon points="0,-20 17.3,-10 17.3,10 0,20 -17.3,10 -17.3,-10" fill="none" stroke="#2fe0f5" stroke-width="4"/></svg><span data-i18n="lgTarget">Case à cliquer</span></span>
+  </div>
+  <div class="stats" id="stats">
+    <span><span id="statLabel"></span> <b id="statValue">–</b> <span id="statCount"></span></span>
+    <button type="button" id="statReset"></button>
+  </div>
+</div>
+
+<script>
+// ===== LOGIC START =====
+const ROWS = [8, 9, 8, 9, 8];
+const N_GIFTS = 3;
+const GOLD = "gold", BLOCKED = "x", EMPTY = "empty", ALERT = "alert", GIFT = "gift";
+const CYCLE = { [EMPTY]: ALERT, [ALERT]: GIFT, [GIFT]: EMPTY };
+// Poids de l'incertitude restante dans l'estimation du nombre de clics
+// (réglé par simulation de parties).
+const INFO_WEIGHT = 0.6;
+
+// Cases : rangée r, colonne c, position horizontale x en demi-cases
+// (les rangées de 8 sont décalées d'une demi-case vers la droite).
+const CELLS = [];
+ROWS.forEach((n, r) => { for (let c = 0; c < n; c++) CELLS.push({ r, c, x: 2 * c + (n === 8 ? 1 : 0) }); });
+const NC = CELLS.length;
+const POS = new Map(CELLS.map((p, i) => [p.r + "," + p.x, i]));
+const NB = CELLS.map(({ r, x }) =>
+  [[r, x - 2], [r, x + 2], [r - 1, x - 1], [r - 1, x + 1], [r + 1, x - 1], [r + 1, x + 1]]
+    .map(([a, b]) => POS.get(a + "," + b)).filter(v => v !== undefined));
+const ADJ = new Uint8Array(NC * NC);
+NB.forEach((l, x) => l.forEach(j => { ADJ[x * NC + j] = 1; }));
+const label = i => `${CELLS[i].r + 1}-${CELLS[i].c + 1}`;
+
+// Règles du jeu utilisées :
+//  - case cliquée qui contient un cadeau : seule cette case est révélée ;
+//  - case cliquée voisine d'un cadeau caché : « ! », seule cette case est révélée ;
+//  - sinon la case est vide et ses voisines sont révélées (sans information) ;
+//  - un « ! » s'efface dès qu'il ne touche plus aucun cadeau caché.
+// Contraintes tirées de la grille :
+//  - « ! » affiché : au moins un cadeau caché le touche ;
+//  - case cliquée vide, ou « ! » effacé : aucun cadeau caché ne la touche.
+function constraintsOf(states, clicked, vanished) {
+  const cons = [];
+  states.forEach((s, i) => {
+    const around = NB[i].filter(j => states[j] === GOLD);
+    if (s === ALERT) cons.push({ cell: i, need: true, around });
+    else if (s === EMPTY && (clicked[i] || vanished[i])) cons.push({ cell: i, need: false, around });
+  });
+  return cons;
+}
+
+// Vrai si au moins une répartition des récompenses restantes colle avec la grille.
+function feasible(states, clicked, vanished) {
+  const hidden = [];
+  states.forEach((s, i) => { if (s === GOLD) hidden.push(i); });
+  const k = N_GIFTS - states.filter(s => s === GIFT).length;
+  if (k < 0) return false;
+  const cons = constraintsOf(states, clicked, vanished);
+  const mark = new Uint8Array(NC);
+  let ok = false;
+  const pick = [];
+  (function rec(start) {
+    if (ok) return;
+    if (pick.length === k) { ok = cons.every(c => c.around.some(j => mark[j]) === c.need); return; }
+    for (let s = start; s <= hidden.length - (k - pick.length) && !ok; s++) {
+      const i = hidden[s]; pick.push(i); mark[i] = 1; rec(s + 1); pick.pop(); mark[i] = 0;
+    }
+  })(0);
+  return ok;
+}
+
+// La 2e case ✕ est toujours le symétrique de la 1re (rotation de 180°).
+const opposite = i => CELLS.findIndex(p => p.r === 4 - CELLS[i].r && p.x === 16 - CELLS[i].x);
+
+function combos(pool, k, visit) {
+  const pick = [];
+  (function rec(start) {
+    if (pick.length === k) { visit(pick); return; }
+    for (let s = start; s <= pool.length - (k - pick.length); s++) {
+      pick.push(pool[s]); rec(s + 1); pick.pop();
+    }
+  })(0);
+}
+
+// ---------- Recherche du meilleur clic ----------
+// Résultat d'un clic sur x si les cadeaux restants sont dans t :
+// 0 = vide, 1 = « ! », 2 + m = cadeau, où m indique quels « ! » voisins restent affichés.
+function sigOf(t, x, Hx) {
+  if (t.includes(x)) {
+    let m = 0;
+    Hx.forEach((h, b) => { if (t.some(a => a !== x && ADJ[h * NC + a])) m |= 1 << b; });
+    return 2 + m;
+  }
+  for (const a of t) if (ADJ[x * NC + a]) return 1;
+  return 0;
+}
+function split(cf, x, H) {
+  const Hx = H.filter(h => ADJ[x * NC + h]);
+  const groups = new Map();
+  for (const t of cf) {
+    const s = sigOf(t, x, Hx);
+    let g = groups.get(s);
+    if (!g) { g = []; groups.set(s, g); }
+    g.push(t);
+  }
+  return { groups, Hx };
+}
+function nextState(sig, x, Hx, g, op, H, k) {
+  const op2 = op.slice(); op2[x] = 1;
+  if (sig >= 2) {
+    const gone = Hx.filter((h, b) => !((sig - 2) >> b & 1));
+    return { cf: g.map(t => t.filter(a => a !== x)), op: op2, H: H.filter(h => !gone.includes(h)), k: k - 1 };
+  }
+  if (sig === 1) return { cf: g, op: op2, H: H.concat([x]), k };
+  for (const j of NB[x]) op2[j] = 1;
+  return { cf: g, op: op2, H, k };
+}
+// Estimation du nombre de clics restants sans calcul plus poussé.
+const leaf = (n, k) => (k === 0 ? 0 : k + INFO_WEIGHT * Math.log2(n));
+function quick(cf, x, H, k) {
+  const { groups } = split(cf, x, H);
+  let v = 1;
+  for (const [s, g] of groups) v += g.length / cf.length * leaf(g.length, s >= 2 ? k - 1 : k);
+  return v;
+}
+// Espérance du nombre de clics restants en jouant au mieux, calculée sur
+// `depth` clics en envisageant chaque résultat possible (les `beam` cases les
+// plus prometteuses sont approfondies à chaque niveau).
+function value(cf, op, H, k, depth, beam) {
+  if (k === 0) return [0, -1];
+  if (cf.length === 1) return [k, cf[0][0]];
+  const cands = [];
+  for (let x = 0; x < NC; x++) if (!op[x]) cands.push([quick(cf, x, H, k), x]);
+  cands.sort((a, b) => a[0] - b[0]);
+  if (depth <= 1) return cands[0];
+  let best = [Infinity, -1];
+  for (const [, x] of cands.slice(0, beam)) {
+    const { groups, Hx } = split(cf, x, H);
+    if (groups.size === 1 && !(groups.keys().next().value >= 2)) continue; // clic inutile
+    let v = 1;
+    for (const [s, g] of groups) {
+      const ns = nextState(s, x, Hx, g, op, H, k);
+      v += g.length / cf.length * value(ns.cf, ns.op, ns.H, ns.k, depth - 1, beam)[0];
+      if (v >= best[0]) break;
+    }
+    if (v < best[0]) best = [v, x];
+  }
+  return best[1] < 0 ? cands[0] : best;
+}
+
+// ---------- Analyse de la grille ----------
+function analyse(states, clicked, vanished, opts = {}) {
+  const res = { probs: {}, score: 0, best: null, error: null, configs: 0, certain: [], found: 0, remaining: 0 };
+  const hidden = [];
+  states.forEach((s, i) => { if (s === GOLD) hidden.push(i); });
+  res.found = states.filter(s => s === GIFT).length;
+  const k = N_GIFTS - res.found;
+  res.remaining = k;
+  if (k < 0) { res.error = { code: "tooMany", cells: [] }; return res; }
+  if (k === 0) return res;
+
+  const cons = constraintsOf(states, clicked, vanished);
+  const forbidden = new Uint8Array(NC);
+  cons.forEach(c => { if (!c.need) c.around.forEach(j => { forbidden[j] = 1; }); });
+  const needs = cons.filter(c => c.need).map(c => c.around);
+  const mark = new Uint8Array(NC);
+  let configs = [];
+  combos(hidden.filter(i => !forbidden[i]), k, pick => {
+    pick.forEach(i => { mark[i] = 1; });
+    if (needs.every(a => a.some(j => mark[j]))) configs.push(pick.slice());
+    pick.forEach(i => { mark[i] = 0; });
+  });
+
+  if (!configs.length) {
+    // Saisie incohérente : on garde les répartitions qui contredisent le moins
+    // de cases, on signale ces cases et on propose quand même un clic.
+    let bestV = Infinity;
+    const blame = new Map();
+    combos(hidden, k, pick => {
+      pick.forEach(i => { mark[i] = 1; });
+      const bad = cons.filter(c => c.around.some(j => mark[j]) !== c.need);
+      pick.forEach(i => { mark[i] = 0; });
+      if (bad.length > bestV) return;
+      if (bad.length < bestV) { bestV = bad.length; configs = []; blame.clear(); }
+      configs.push(pick.slice());
+      bad.forEach(c => blame.set(c.cell, (blame.get(c.cell) || 0) + 1));
+    });
+    if (!configs.length) { res.error = { code: "tooMany", cells: [] }; return res; }
+    const top = Math.max(...blame.values());
+    res.error = { code: "conflict", cells: [...blame].filter(([, n]) => n === top).map(([c]) => c) };
+  }
+
+  const N = configs.length;
+  res.configs = N;
+  const count = new Float64Array(NC);
+  for (const t of configs) for (const i of t) count[i]++;
+  for (const i of hidden) res.probs[i] = count[i] / N;
+  res.certain = hidden.filter(i => count[i] === N);
+
+  const op = new Uint8Array(NC);
+  states.forEach((s, i) => { if (s !== GOLD) op[i] = 1; });
+  const H = states.map((s, i) => (s === ALERT ? i : -1)).filter(i => i >= 0);
+  const depth = opts.depth || (N > 3000 ? 3 : N > 300 ? 4 : 5);
+  const beam = opts.beam || 6;
+  // premier niveau : toutes les cases, avec préférence pour la plus probable à égalité
+  let best = [Infinity, -1];
+  const cands = hidden.map(x => [quick(configs, x, H, k), x]).sort((a, b) => a[0] - b[0]);
+  for (const [q, x] of cands.slice(0, depth > 1 ? beam : 1)) {
+    let v = q;
+    if (depth > 1) {
+      const { groups, Hx } = split(configs, x, H);
+      v = 1;
+      for (const [s, g] of groups) {
+        const ns = nextState(s, x, Hx, g, op, H, k);
+        v += g.length / N * value(ns.cf, ns.op, ns.H, ns.k, depth - 1, beam)[0];
+      }
+    }
+    if (v < best[0] - 1e-9 || (Math.abs(v - best[0]) <= 1e-9 && res.probs[x] > res.probs[best[1]])) best = [v, x];
+  }
+  res.best = best[1];
+  res.score = best[0];
+  return res;
+}
+// ===== LOGIC END =====
+
+// ---------- Interface ----------
+const SX = 48, SY = 84, R = 40, M = 50;
+const SVGNS = "http://www.w3.org/2000/svg";
+const board = document.getElementById("board");
+const center = i => [M + CELLS[i].x * SX, M + CELLS[i].r * SY];
+const hexPts = (cx, cy, r) => Array.from({ length: 6 }, (_, k) => {
+  const a = (-90 + 60 * k) * Math.PI / 180;
+  return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`;
+}).join(" ");
+const el = (tag, attrs, parent) => {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+const mix = (a, b, t) => {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const A = p(a), B = p(b);
+  return "#" + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, "0")).join("");
+};
+
+let states, phase, history, res;
+let origin = [];     // origin[j] = case cliquée qui a révélé la case j
+let at = [];         // at[j] = numéro du clic qui a révélé la case j
+let tick = 0;
+let vanished = [];   // vanished[j] = 1 si le « ! » de j s'est effacé
+let vanishedBy = []; // cadeau dont la découverte a effacé ce « ! »
+let note = null;     // message ponctuel après la dernière action
+let pending = [];    // « ! » voisins d'une récompense trouvée, encore sans réponse (« !? »)
+let asking = [];     // toutes les cases de la question en cours (modifiables jusqu'à la validation)
+let askTimer = 0;    // validation automatique 2 s après la dernière réponse
+const ASK_DELAY = 2000;
+let autoFilled = []; // réponses remplies automatiquement : [case, toujours « ! » ?]
+let calcId = 0;
+
+function reset() {
+  cancelScheduledCelebrate();
+  lastTap = -1;
+  states = CELLS.map(() => GOLD);
+  origin = CELLS.map(() => -1);
+  at = CELLS.map(() => -1);
+  tick = 0;
+  vanished = CELLS.map(() => 0);
+  vanishedBy = CELLS.map(() => -1);
+  pending = [];
+  asking = [];
+  cancelAsk();
+  autoFilled = [];
+  phase = "setup";
+  history = [];
+  refresh();
+}
+function push() { history.push([states.slice(), phase, origin.slice(), at.slice(), tick, vanished.slice(), vanishedBy.slice(), pending.slice(), asking.slice()]); }
+function undo() { cancelCelebration(); cancelScheduledCelebrate(); lastTap = -1; if (history.length) { cancelAsk(); [states, phase, origin, at, tick, vanished, vanishedBy, pending, asking] = history.pop(); asking = asking || []; note = null; autoFilled = []; refresh(); } }
+function start() { push(); phase = "play"; refresh(); }
+
+function act(i) {
+  if (celebration || demoActive()) return;
+  cancelScheduledCelebrate();
+  const s = states[i];
+  note = null;
+  autoFilled = [];
+  lastTap = i;
+  if (phase === "setup") {
+    // une seule paire de ✕ : la case touchée et son symétrique
+    if (s !== GOLD && s !== BLOCKED) return;
+    push();
+    states = states.map(x => (x === BLOCKED ? GOLD : x));
+    if (s === GOLD) { states[i] = BLOCKED; const j = opposite(i); if (j >= 0) states[j] = BLOCKED; }
+  } else if (asking.length) {
+    // question sur les « ! » en cours : seules ses cases réagissent,
+    // et chaque toucher fait avancer « !? » → « ! » → vide → « !? »
+    if (!asking.includes(i)) return;
+    push();
+    if (pending.includes(i)) setPending(i, true);
+    else if (states[i] === ALERT) setPending(i, false);
+    else { states[i] = EMPTY; vanished[i] = 0; pending.push(i); }
+    autoFilled = [];
+    autoResolve();
+  } else if (s === GOLD) {
+    // case cliquée dans le jeu : on suppose d'abord qu'elle est vide,
+    // donc qu'elle révèle aussi ses voisines dorées
+    push();
+    tick++;
+    for (const j of [i, ...NB[i]]) if (states[j] === GOLD) { states[j] = EMPTY; origin[j] = i; at[j] = tick; }
+  } else if (CYCLE[s]) {
+    push();
+    const next = CYCLE[s];
+    states[i] = next;
+    vanished[i] = 0;
+    if (next === GIFT) {
+      // les « ! » voisins d'une récompense trouvée peuvent s'effacer dans le jeu :
+      // on demande lesquels restent (sauf quand la réponse est certaine)
+      for (const j of NB[i]) if (states[j] === ALERT) { states[j] = EMPTY; vanished[j] = 0; vanishedBy[j] = i; pending.push(j); }
+      asking = pending.slice();
+      autoResolve();
+      if (!pending.length) asking = []; // tout était certain : pas de question
+    } else if (s === GIFT) {
+      for (const j of NB[i]) if (vanishedBy[j] === i && states[j] === EMPTY) { states[j] = ALERT; vanished[j] = 0; vanishedBy[j] = -1; }
+    }
+    if (origin[i] === i) {
+      // seule une case cliquée VIDE révèle ses voisines ;
+      // un « ! » ou un cadeau ne révèle que la case elle-même
+      for (let j = 0; j < CELLS.length; j++) {
+        if (j === i || origin[j] !== i) continue;
+        if (next !== EMPTY) { if (states[j] === EMPTY) states[j] = GOLD; }
+        else if (states[j] === GOLD) states[j] = EMPTY;
+      }
+    }
+  } else return;
+  refresh();
+}
+
+// Réponse à la question « ce ! est-il toujours affiché ? » (boutons du panneau de conseil)
+function answer(j, still) {
+  if (!asking.includes(j)) return;
+  push();
+  setPending(j, still);
+  autoFilled = [];
+  autoResolve();
+  refresh();
+}
+// Quand toutes les cases ont une réponse, la saisie est validée 2 s plus tard ;
+// toucher une case entre-temps relance ce délai.
+function scheduleAsk() {
+  clearTimeout(askTimer);
+  askTimer = setTimeout(() => { askTimer = 0; asking = []; autoFilled = []; refresh(); }, ASK_DELAY);
+}
+function cancelAsk() { clearTimeout(askTimer); askTimer = 0; }
+function setPending(j, still) {
+  pending = pending.filter(x => x !== j);
+  if (still) { states[j] = ALERT; vanished[j] = 0; } else { states[j] = EMPTY; vanished[j] = 1; }
+}
+// Remplit les réponses certaines : celles dont l'autre choix ne colle avec aucune répartition.
+function autoResolve() {
+  let changed = true;
+  while (changed && pending.length) {
+    changed = false;
+    const clicked = origin.map((o, i) => o === i);
+    for (const j of pending.slice()) {
+      const tryIt = still => {
+        const st = states.slice(), vn = vanished.slice();
+        if (still) { st[j] = ALERT; vn[j] = 0; } else { st[j] = EMPTY; vn[j] = 1; }
+        return feasible(st, clicked, vn);
+      };
+      const canStill = tryIt(true), canGone = tryIt(false);
+      if (canStill !== canGone) { setPending(j, canStill); autoFilled.push([j, canStill]); changed = true; }
+    }
+  }
+}
+
+function refresh() {
+  if (demoActive()) return; // la démonstration du tutoriel occupe le panneau
+  res = null;
+  const id = ++calcId;
+  if (asking.length && !pending.length) scheduleAsk(); else cancelAsk();
+  if (phase === "play" && !asking.length) {
+    // le calcul peut prendre une seconde : on affiche d'abord la grille
+    document.getElementById("panel").classList.add("busy");
+    setTimeout(() => {
+      if (id !== calcId) return;
+      res = analyse(states, origin.map((o, i) => o === i), vanished);
+      draw(); status();
+      if (res.remaining === 0 && !res.error) scheduleCelebrate();
+    }, 30);
+  }
+  draw();
+  status();
+  document.getElementById("start").hidden = phase !== "setup";
+  document.getElementById("undo").disabled = !history.length;
+  document.getElementById("step1").classList.toggle("on", phase === "setup");
+  document.getElementById("step2").classList.toggle("on", phase === "play");
+  saveGrid();
+}
+
+// ---------- Retournement animé des cases ----------
+// Animation pilotée par requestAnimationFrame : à chaque image, la face est
+// « écrasée » perpendiculairement à un axe incliné à 45°, ce qui donne
+// l'illusion d'une rotation 3D autour de cet axe.
+const FLIP_MS = 600;          // durée d'un retournement
+const FLIP_STAGGER = 70;      // décalage par anneau autour de la case touchée
+const FLIP_AXIS = -45;        // axe de rotation : du coin bas-gauche au coin haut-droit
+const reduceMotion = (() => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } })();
+let shown = null;             // états affichés au dessin précédent
+let flipFrom = [];            // état de départ du retournement en cours
+let flipStart = [];           // instant de départ (ms, horloge de requestAnimationFrame)
+let lastTap = -1;             // case touchée en dernier : point de départ de la cascade
+let anims = [];               // retournements en cours
+let rafId = 0;
+
+function drawFace(g, i, s, probs, maxp) {
+  const [cx, cy] = center(i);
+  let lblFill = "#7c7565";
+  if (s === GOLD) {
+    const t = i in probs ? probs[i] / maxp : 1;
+    const fill = i in probs ? mix("#4d4128", "#f2d27a", t) : "#e9c46a";
+    el("polygon", { class: "inner", points: hexPts(cx, cy, R), fill, stroke: "#f5a623", "stroke-width": 3 }, g);
+    const dark = !(i in probs) || t > 0.45;
+    lblFill = dark ? "#3a2e12" : "#e8d9b0";
+    if (i in probs) {
+      const t2 = el("text", { class: "pct", x: cx, y: cy + 4, "text-anchor": "middle", fill: dark ? "#241b07" : "#f1ead8" }, g);
+      t2.textContent = Math.round(probs[i] * 100) + "%";
+    }
+  } else if (s === BLOCKED) {
+    el("polygon", { class: "inner", points: hexPts(cx, cy, R), fill: "#2a2721", stroke: "#3d3930", "stroke-width": 2 }, g);
+    const x = el("text", { x: cx, y: cy + 9, "text-anchor": "middle", fill: "#7c7565", "font-size": 26, "pointer-events": "none" }, g);
+    x.textContent = "✕";
+  } else if (s === EMPTY) {
+    el("polygon", { class: "inner", points: hexPts(cx, cy, R), fill: "#0a0a09", stroke: "#57534a", "stroke-width": 2 }, g);
+  } else if (s === ALERT) {
+    el("polygon", { class: "inner", points: hexPts(cx, cy, R), fill: "#0a0a09", stroke: "#ffb300", "stroke-width": 3 }, g);
+    const t = el("text", { x: cx, y: cy + 11, "text-anchor": "middle", fill: "#ffb300", "font-size": 34, "font-weight": 700, "font-family": "Chakra Petch, sans-serif", "pointer-events": "none" }, g);
+    t.textContent = "!";
+  } else if (s === GIFT) {
+    el("polygon", { class: "inner", points: hexPts(cx, cy, R), fill: "#2e8b4a", stroke: "#7dffa0", "stroke-width": 3 }, g);
+    el("rect", { x: cx - 13, y: cy - 6, width: 26, height: 19, fill: "#e53935" }, g);
+    el("rect", { x: cx - 16, y: cy - 13, width: 32, height: 8, fill: "#ef5350" }, g);
+    el("rect", { x: cx - 3, y: cy - 13, width: 6, height: 26, fill: "#ffd54f" }, g);
+    el("ellipse", { cx: cx - 6, cy: cy - 18, rx: 6, ry: 4, fill: "none", stroke: "#ffd54f", "stroke-width": 3 }, g);
+    el("ellipse", { cx: cx + 6, cy: cy - 18, rx: 6, ry: 4, fill: "none", stroke: "#ffd54f", "stroke-width": 3 }, g);
+    lblFill = "#c9f5d4";
+  }
+  const lb = el("text", { class: "lbl", x: cx, y: cy + R - 9, "text-anchor": "middle", fill: lblFill }, g);
+  lb.textContent = label(i);
+}
+
+// Une case en cours de retournement : ancienne face, nouvelle face, ombre et reflet,
+// regroupés dans un même groupe dont la transformation change à chaque image.
+function buildFlip(g, i, from, to, probs, maxp) {
+  const [cx, cy] = center(i);
+  const wrap = el("g", { "pointer-events": "none" }, g);
+  const back = el("g", {}, wrap);
+  drawFace(back, i, from, probs, maxp);
+  const front = el("g", {}, wrap);
+  drawFace(front, i, to, probs, maxp);
+  const shade = el("polygon", { points: hexPts(cx, cy, R), fill: "#000", opacity: 0 }, wrap);
+  const clip = el("clipPath", { id: `flipclip-${i}` }, wrap);
+  el("polygon", { points: hexPts(cx, cy, R) }, clip);
+  const glintWrap = el("g", { "clip-path": `url(#flipclip-${i})` }, wrap);
+  // bande de lumière parallèle à l'axe, qui glisse en travers de la face
+  const glint = el("rect", { x: cx - 2 * R, y: cy - R * 0.32, width: 4 * R, height: R * 0.64, fill: "url(#glintGrad)", opacity: 0 }, glintWrap);
+  return { i, cx, cy, wrap, back, front, shade, glintWrap, glint };
+}
+
+// Met à jour une case à l'instant `now`. Renvoie false quand le retournement est fini.
+function stepFlip(a, now) {
+  const p = (now - flipStart[a.i]) / FLIP_MS;
+  if (p >= 1) {
+    a.wrap.removeAttribute("transform");
+    a.back.remove(); a.shade.remove(); a.glintWrap.remove();
+    a.front.removeAttribute("display");
+    a.wrap.removeAttribute("pointer-events");
+    flipFrom[a.i] = null;
+    return false;
+  }
+  const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, p)); // accélère puis ralentit
+  const phi = Math.PI * e;                                  // angle de rotation, 0 → 180°
+  const c = Math.cos(phi);
+  const k = Math.max(Math.abs(c), 0.002);                   // largeur apparente de la face
+  const { cx, cy } = a;
+  a.wrap.setAttribute("transform",
+    `translate(${cx} ${cy}) rotate(${FLIP_AXIS}) scale(1 ${k.toFixed(4)}) rotate(${-FLIP_AXIS}) translate(${-cx} ${-cy})`);
+  const firstHalf = c > 0;
+  a.back.setAttribute("display", firstHalf ? "inline" : "none");
+  a.front.setAttribute("display", firstHalf ? "none" : "inline");
+  a.shade.setAttribute("opacity", ((1 - k) * 0.55).toFixed(3));
+  // reflet spéculaire : la bande traverse la face et brille surtout quand elle est de biais
+  const off = (2 * e - 1) * R * 1.5;
+  a.glint.setAttribute("transform", `rotate(${FLIP_AXIS} ${cx} ${cy}) translate(0 ${off.toFixed(2)})`);
+  a.glint.setAttribute("opacity", (Math.pow(Math.sin(phi), 1.5) * 0.95).toFixed(3));
+  return true;
+}
+
+function frame(now) {
+  anims = anims.filter(a => stepFlip(a, now));
+  rafId = anims.length ? requestAnimationFrame(frame) : 0;
+}
+
+function draw() {
+  board.textContent = "";
+  anims = [];
+  const defs = el("defs", {}, board);
+  const grad = el("linearGradient", { id: "glintGrad", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+  [[0, 0], [0.5, 0.9], [1, 0]].forEach(([o, a]) =>
+    el("stop", { offset: o, "stop-color": "#fffdf3", "stop-opacity": a }, grad));
+
+  const probs = res ? res.probs : {};
+  const vals = Object.values(probs);
+  const maxp = vals.length ? Math.max(...vals) || 1 : 1;
+  const best = res && res.best !== null && res.remaining > 0 ? res.best : null;
+  const conflict = new Set(res && res.error ? res.error.cells : []);
+
+  // repère les cases qui ont changé d'état depuis le dernier dessin
+  const now = performance.now();
+  if (shown && !reduceMotion) {
+    const [tx, ty] = lastTap >= 0 ? center(lastTap) : [0, 0];
+    states.forEach((s, i) => {
+      if (s === shown[i]) return;
+      const ring = lastTap >= 0 ? Math.round(Math.hypot(center(i)[0] - tx, center(i)[1] - ty) / (2 * SX)) : 0;
+      flipFrom[i] = shown[i];
+      flipStart[i] = now + ring * FLIP_STAGGER;
+    });
+  }
+  shown = states.slice();
+
+  CELLS.forEach((_, i) => {
+    const [cx, cy] = center(i);
+    const s = states[i];
+    const locked = s === BLOCKED && phase === "play";
+    const g = el("g", { class: "cell" + (locked ? " locked" : ""), tabindex: locked ? -1 : 0, role: "gridcell",
+      "aria-label": `${T("cell")} ${label(i)}` + (s === GOLD && i in probs ? `, ${pct(probs[i])}` : "") }, board);
+    el("polygon", { points: hexPts(cx, cy, R + 8), fill: "#211e18", stroke: "#36322a", "stroke-width": 2 }, g);
+    if (flipFrom[i] != null && now - flipStart[i] < FLIP_MS) {
+      // retournement en cours : il reprend là où il en était si la grille est redessinée
+      const a = buildFlip(g, i, flipFrom[i], s, probs, maxp);
+      stepFlip(a, now);
+      anims.push(a);
+    } else {
+      flipFrom[i] = null;
+      drawFace(el("g", {}, g), i, s, probs, maxp);
+    }
+    if (asking.includes(i)) {
+      // case de la question : contour en pointillés tant que la saisie n'est pas validée
+      el("polygon", { points: hexPts(cx, cy, R - 3), fill: "none", stroke: "#ffb300", "stroke-width": 3, "stroke-dasharray": "7 5", "pointer-events": "none" }, g);
+    }
+    if (pending.includes(i)) {
+      // « !? » : à confirmer
+      const q = el("text", { x: cx, y: cy + 10, "text-anchor": "middle", fill: "#ffb300", "font-size": 28, "font-weight": 700, "font-family": "Chakra Petch, sans-serif", "pointer-events": "none" }, g);
+      q.textContent = "!?";
+    }
+    if (conflict.has(i)) el("polygon", { points: hexPts(cx, cy, R + 4), fill: "none", stroke: "#ff5a3c", "stroke-width": 5, "pointer-events": "none" }, g);
+    g.addEventListener("click", () => act(i));
+    g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(i); } });
+  });
+  if (anims.length && !rafId) rafId = requestAnimationFrame(frame);
+
+  if (best !== null) {
+    const [cx, cy] = center(best);
+    el("polygon", { class: "target", points: hexPts(cx, cy, R + 5) }, board);
+  }
+  if (demoTap >= 0) { const [cx, cy] = center(demoTap); el("circle", { class: "tap-ripple", cx, cy, r: 22 }, board); }
+}
+
+function autoText() {
+  return T("autoNote", { list: autoFilled.map(([j, still]) => `${label(j)} (${T(still ? "autoStill" : "autoGone")})`).join(", ") });
+}
+
+function status() {
+  const panel = document.getElementById("panel");
+  const kicker = document.getElementById("kicker");
+  const headline = document.getElementById("headline");
+  const chips = document.getElementById("chips");
+  const help = document.getElementById("help");
+  panel.className = "panel";
+  chips.innerHTML = "";
+  const chip = html => { const c = document.createElement("span"); c.className = "chip"; c.innerHTML = html; chips.appendChild(c); };
+
+  if (phase === "setup") {
+    const nx = states.filter(s => s === BLOCKED).length;
+    kicker.textContent = T("setupKicker");
+    headline.textContent = T("setupHead");
+    chip(T("setupChip", { n: nx }));
+    help.innerHTML = T("setupHelp");
+    return;
+  }
+  if (asking.length) {
+    kicker.textContent = T("askKicker");
+    headline.textContent = T("askHead");
+    help.innerHTML = (autoFilled.length ? `<strong>${autoText()}</strong><br>` : "") +
+      (pending.length ? "" : `<strong>${T("askValidating")}</strong><br>`) + T("askHelp");
+    for (const j of asking) {
+      const row = document.createElement("div");
+      row.className = "ask";
+      const name = document.createElement("span");
+      name.className = "chip";
+      name.textContent = `${T("cell")} ${label(j)}`;
+      const isPending = pending.includes(j), isStill = !isPending && states[j] === ALERT;
+      const yes = document.createElement("button");
+      yes.textContent = T("askStill");
+      yes.setAttribute("aria-pressed", isStill);
+      if (isStill) yes.className = "on";
+      yes.addEventListener("click", () => answer(j, true));
+      const no = document.createElement("button");
+      no.textContent = T("askGone");
+      no.setAttribute("aria-pressed", !isPending && !isStill);
+      if (!isPending && !isStill) no.className = "on";
+      no.addEventListener("click", () => answer(j, false));
+      row.append(name, yes, no);
+      chips.appendChild(row);
+    }
+    return;
+  }
+  if (!res) {
+    kicker.textContent = T("playKicker");
+    headline.textContent = T("calc");
+    help.innerHTML = T("playHelp");
+    return;
+  }
+  if (res.error && (res.error.code !== "conflict" || res.best === null)) {
+    panel.classList.add("error");
+    kicker.textContent = T("errKicker");
+    headline.textContent = T("errHead");
+    help.textContent = T("err_tooMany");
+    return;
+  }
+  if (res.remaining === 0) {
+    panel.classList.add("done");
+    kicker.textContent = T("doneKicker");
+    headline.textContent = T("doneHead");
+    chip(T("chipGifts", { f: 3 }));
+    help.textContent = T("doneHelp");
+    return;
+  }
+  const p = res.probs[res.best];
+  if (res.error) panel.classList.add("error");
+  kicker.textContent = res.error ? T("errKicker") : T("playKicker");
+  headline.innerHTML = T("playHead", { c: label(res.best), r: CELLS[res.best].r + 1, h: CELLS[res.best].c + 1 });
+  chip(T("chipProb", { p: pct(p) }));
+  chip(T("chipLeft", { n: num(res.score) }));
+  chip(T("chipGifts", { f: res.found }));
+  if (res.certain.length) chip(T("chipCertain", { list: res.certain.map(label).join(", ") }));
+  help.innerHTML = (res.error ? `<strong class="warn">${T("err_conflict", { list: res.error.cells.map(label).join(", ") })}</strong><br>` : "") +
+    (autoFilled.length ? `<strong>${autoText()}</strong><br>` : "") + T("playHelp");
+}
+
+// ---------- Sauvegarde (cookie, avec repli sur le stockage du navigateur) ----------
+const store = {
+  get(k) {
+    try {
+      const m = document.cookie.match(new RegExp("(?:^|; )" + k + "=([^;]*)"));
+      if (m) return decodeURIComponent(m[1]);
+    } catch (e) {}
+    try { return localStorage.getItem(k); } catch (e) { return null; }
+  },
+  set(k, v) {
+    // cookie limité au dossier de l'outil (n'est pas envoyé au reste du site)
+    try { document.cookie = `${k}=${encodeURIComponent(v)}; max-age=${60 * 60 * 24 * 365}; path=${location.pathname.replace(/[^/]*$/, "") || "/"}; SameSite=Lax`; } catch (e) {}
+    try { localStorage.setItem(k, v); } catch (e) {}
+  },
+};
+const CODE = { [GOLD]: "g", [BLOCKED]: "x", [EMPTY]: "e", [ALERT]: "a", [GIFT]: "c" };
+const DECODE = Object.fromEntries(Object.entries(CODE).map(([k, v]) => [v, k]));
+function saveGrid() {
+  store.set("blackcrest-grid", JSON.stringify({
+    v: 1, p: phase, t: tick, s: states.map(s => CODE[s]).join(""), o: origin.join("."), a: at.join("."),
+    vn: vanished.join(""), vb: vanishedBy.join("."), pd: pending.join("."), as: asking.join("."),
+  }));
+}
+function loadGrid() {
+  try {
+    const d = JSON.parse(store.get("blackcrest-grid"));
+    const n = CELLS.length;
+    if (!d || d.v !== 1 || d.s.length !== n) return false;
+    const o = d.o.split(".").map(Number), a = d.a.split(".").map(Number);
+    if (o.length !== n || a.length !== n || [...d.s].some(c => !DECODE[c])) return false;
+    states = [...d.s].map(c => DECODE[c]);
+    phase = d.p === "play" ? "play" : "setup";
+    origin = o; at = a; tick = d.t || 0; history = [];
+    vanished = d.vn && d.vn.length === n ? [...d.vn].map(Number) : CELLS.map(() => 0);
+    vanishedBy = d.vb ? d.vb.split(".").map(Number) : CELLS.map(() => -1);
+    if (vanishedBy.length !== n) vanishedBy = CELLS.map(() => -1);
+    pending = d.pd ? d.pd.split(".").map(Number).filter(j => j >= 0 && j < n) : [];
+    asking = d.as ? d.as.split(".").map(Number).filter(j => j >= 0 && j < n) : pending.slice();
+    autoFilled = [];
+    return true;
+  } catch (e) { return false; }
+}
+
+// ---------- Langues ----------
+const APP_VERSION = "1.20";
+const I18N = {
+  fr: {
+    steps: "Étapes", step1: "1 · Cases ✕", step2: "2 · Recherche",
+    grid: "Panneau de l'événement", start: "Commencer", undo: "Annuler", reset: "Recommencer",
+    legend: "Légende", lgGold: "Case dorée : % = chance d'une récompense", lgEmpty: "Vide",
+    lgAlert: "Récompense dans une case voisine", lgGift: "Récompense", lgTarget: "Case à cliquer",
+    bravo: "Bravo, vous avez trouvé les 3 récompenses !",
+    bravoHint: "Si la case cliquée ne correspond pas à la troisième récompense, cliquez sur le bouton ANNULER.",
+    statLabel: "Nombre moyen de décodeurs utilisés par panneau :", statNone: "pas encore de panneau résolu",
+    statCount: v => `(${v.d} décodeurs sur ${v.p} panneau${v.p > 1 ? "x" : ""})`, statReset: "Reset", statConfirm: "Confirmer ?",
+    cell: "Case", lang: "Langue", version: "Solveur version", install: "Installer",
+    iosHint: "Pour installer l'outil sur iPhone : bouton Partager, puis « Sur l'écran d'accueil ».",
+    setupKicker: "Étape 1", setupHead: "Marquez les cases barrées du jeu",
+    setupChip: v => `Cases ✕ marquées : <b>${v.n}</b>`,
+    setupHelp: "Touchez sur le panneau une des 2 cases barrées (✕) du jeu : l'autre se place toute seule, car le jeu la met toujours à l'opposé. Puis <strong>COMMENCER</strong>.",
+    askKicker: "Récompense trouvée", askHead: "Les « ! » voisins sont-ils toujours affichés ?",
+    askHelp: "Dans le jeu, un « ! » s'efface quand plus aucune récompense cachée ne le touche. Pour chaque case « !? », touchez-la sur le panneau (« !? » → « ! » → vide) ou utilisez les boutons ci-dessus. La saisie est validée 2 secondes après la dernière réponse.",
+    askValidating: "Toutes les cases ont une réponse : validation dans 2 secondes. Touchez une case pour la changer.",
+    askStill: "Toujours « ! »", askGone: "Effacé", autoStill: "toujours « ! »", autoGone: "effacé",
+    autoNote: v => `Rempli automatiquement, car la réponse est certaine : ${v.list}.`,
+    errKicker: "Saisie incohérente", errHead: "Ces cases ne collent pas",
+    err_tooMany: "Plus de 3 récompenses ont été indiquées. Touchez une récompense pour corriger.",
+    err_alertNoRoom: v => `La case ${v.c} affiche « ! » mais aucune case dorée voisine ne peut contenir de récompense. Vérifiez la saisie.`,
+    err_emptyNextToGift: v => `La case ${v.c} est notée vide alors qu'elle touche une récompense découverte plus tard. Elle devrait afficher « ! » : touchez-la pour corriger.`,
+    err_noConfig: "Aucune répartition des récompenses ne correspond aux cases saisies. Vérifiez-les ou touchez « ANNULER ».",
+    err_conflict: v => `Les cases entourées en rouge (${v.list}) ne collent pas avec le reste. Vérifiez-les ou touchez « ANNULER ». En attendant, voici la case la plus probable.`,
+    vanishNote: "Les « ! » voisins de la récompense ont été effacés, comme dans le jeu. Si l'un d'eux est toujours affiché dans le jeu, touchez-le ici : c'est un indice précieux.",
+    calc: "Calcul…",
+    doneKicker: "Terminé", doneHead: "Les 3 récompenses sont trouvées",
+    doneHelp: "Touchez « RECOMMENCER » pour un nouveau panneau.",
+    playKicker: "Prochain clic dans le jeu",
+    playHead: v => `Case <em>${v.c}</em> · rangée ${v.r}, hexagone ${v.h}`,
+    chipProb: v => `<b>${v.p}</b> que ce soit une récompense`,
+    chipLeft: v => `Environ <b>${v.n}</b> clics restants`,
+    chipGifts: v => `Récompenses <b>${v.f}/3</b>`,
+    chipCertain: v => `Récompense certaine : <b>${v.list}</b>`,
+    playHelp: "Cliquez cette case dans le jeu, puis touchez-la ici : elle et ses voisines deviennent noires. " +
+      "Touchez ensuite chaque case noire pour reporter ce que le jeu affiche : <strong>vide → ! → récompense</strong>. " +
+      "Si la case cliquée affiche « ! » ou une récompense, ses voisines redeviennent dorées, comme dans le jeu. " +
+      "Si une case révélée comme voisine affiche « ! » dans le jeu, touchez-la pour le marquer.",
+  },
+  es: {
+    steps: "Pasos", step1: "1 · Casillas ✕", step2: "2 · Búsqueda",
+    grid: "Panel del evento", start: "Empezar", undo: "Deshacer", reset: "Reiniciar",
+    legend: "Leyenda", lgGold: "Casilla dorada: % = probabilidad de recompensa", lgEmpty: "Vacía",
+    lgAlert: "Recompensa en una casilla vecina", lgGift: "Recompensa", lgTarget: "Casilla que pulsar",
+    bravo: "¡Bravo, has encontrado las 3 recompensas!",
+    bravoHint: "Si la casilla pulsada no es la tercera recompensa, pulsa el botón DESHACER.",
+    statLabel: "Media de decodificadores usados por panel:", statNone: "aún no hay ningún panel resuelto",
+    statCount: v => `(${v.d} decodificadores en ${v.p} panel${v.p > 1 ? "es" : ""})`, statReset: "Reset", statConfirm: "¿Confirmar?",
+    cell: "Casilla", lang: "Idioma", version: "Solucionador versión", install: "Instalar",
+    iosHint: "Para instalar la herramienta en iPhone: botón Compartir y luego «Añadir a pantalla de inicio».",
+    setupKicker: "Paso 1", setupHead: "Marca las casillas tachadas del juego",
+    setupChip: v => `Casillas ✕ marcadas: <b>${v.n}</b>`,
+    setupHelp: "Toca en el panel una de las 2 casillas tachadas (✕) del juego: la otra se coloca sola, porque el juego siempre la pone en el lado opuesto. Después <strong>EMPEZAR</strong>.",
+    askKicker: "Recompensa encontrada", askHead: "¿Siguen apareciendo los «!» vecinos?",
+    askHelp: "En el juego, un «!» se borra cuando ya no toca ninguna recompensa oculta. Para cada casilla «!?», tócala en el panel («!?» → «!» → vacía) o usa los botones de arriba. Se valida 2 segundos después de la última respuesta.",
+    askValidating: "Todas las casillas tienen respuesta: se valida en 2 segundos. Toca una casilla para cambiarla.",
+    askStill: "Sigue «!»", askGone: "Borrado", autoStill: "sigue «!»", autoGone: "borrado",
+    autoNote: v => `Rellenado automáticamente, porque la respuesta es segura: ${v.list}.`,
+    errKicker: "Datos incoherentes", errHead: "Estas casillas no cuadran",
+    err_tooMany: "Se han indicado más de 3 recompensas. Toca una recompensa para corregirlo.",
+    err_alertNoRoom: v => `La casilla ${v.c} muestra «!» pero ninguna casilla dorada vecina puede contener una recompensa. Revisa los datos.`,
+    err_emptyNextToGift: v => `La casilla ${v.c} está marcada como vacía pero toca una recompensa descubierta más tarde. Debería mostrar «!»: tócala para corregirlo.`,
+    err_noConfig: "Ninguna distribución de recompensas coincide con las casillas introducidas. Revísalas o toca «DESHACER».",
+    err_conflict: v => `Las casillas rodeadas en rojo (${v.list}) no cuadran con el resto. Revísalas o toca «DESHACER». Mientras tanto, esta es la casilla más probable.`,
+    vanishNote: "Los «!» vecinos de la recompensa se han borrado, como en el juego. Si alguno sigue apareciendo en el juego, tócalo aquí: es una pista muy útil.",
+    calc: "Calculando…",
+    doneKicker: "Terminado", doneHead: "Has encontrado las 3 recompensas",
+    doneHelp: "Toca «REINICIAR» para un panel nuevo.",
+    playKicker: "Próximo clic en el juego",
+    playHead: v => `Casilla <em>${v.c}</em> · fila ${v.r}, hexágono ${v.h}`,
+    chipProb: v => `<b>${v.p}</b> de que sea una recompensa`,
+    chipLeft: v => `Unos <b>${v.n}</b> clics restantes`,
+    chipGifts: v => `Recompensas <b>${v.f}/3</b>`,
+    chipCertain: v => `Recompensa segura: <b>${v.list}</b>`,
+    playHelp: "Pulsa esta casilla en el juego y luego tócala aquí: ella y sus vecinas se vuelven negras. " +
+      "Después toca cada casilla negra para copiar lo que muestra el juego: <strong>vacía → ! → recompensa</strong>. " +
+      "Si la casilla pulsada muestra «!» o una recompensa, sus vecinas vuelven a ser doradas, como en el juego. " +
+      "Si una casilla revelada como vecina muestra «!» en el juego, tócala para marcarlo.",
+  },
+  en: {
+    steps: "Steps", step1: "1 · ✕ cells", step2: "2 · Search",
+    grid: "Event panel", start: "Start", undo: "Undo", reset: "Restart",
+    legend: "Legend", lgGold: "Gold cell: % = chance of a reward", lgEmpty: "Empty",
+    lgAlert: "Reward in an adjacent cell", lgGift: "Reward", lgTarget: "Cell to click",
+    bravo: "Well done, you found all 3 rewards!",
+    bravoHint: "If the clicked cell isn't the third reward, press the UNDO button.",
+    statLabel: "Average decoders used per panel:", statNone: "no panel solved yet",
+    statCount: v => `(${v.d} decoders over ${v.p} panel${v.p > 1 ? "s" : ""})`, statReset: "Reset", statConfirm: "Confirm?",
+    cell: "Cell", lang: "Language", version: "Solver version", install: "Install",
+    iosHint: "To install the tool on iPhone: tap Share, then “Add to Home Screen”.",
+    setupKicker: "Step 1", setupHead: "Mark the crossed-out cells",
+    setupChip: v => `✕ cells marked: <b>${v.n}</b>`,
+    setupHelp: "Tap one of the 2 crossed-out cells (✕) from the game: the other one is placed automatically, because the game always puts it opposite. Then <strong>START</strong>.",
+    askKicker: "Reward found", askHead: "Are the neighbouring “!” still shown?",
+    askHelp: "In the game, a “!” clears once no hidden reward touches it any more. For each “!?” cell, tap it on the panel (“!?” → “!” → empty) or use the buttons above. Your answers are confirmed 2 seconds after the last one.",
+    askValidating: "Every cell has an answer: confirming in 2 seconds. Tap a cell to change it.",
+    askStill: "Still “!”", askGone: "Cleared", autoStill: "still “!”", autoGone: "cleared",
+    autoNote: v => `Filled in automatically, because the answer is certain: ${v.list}.`,
+    errKicker: "Inconsistent input", errHead: "These cells don't add up",
+    err_tooMany: "More than 3 rewards have been entered. Tap a reward to fix it.",
+    err_alertNoRoom: v => `Cell ${v.c} shows “!” but no adjacent gold cell can hold a reward. Check your input.`,
+    err_emptyNextToGift: v => `Cell ${v.c} is marked empty but touches a reward found later. It should show “!”: tap it to fix it.`,
+    err_noConfig: "No reward layout matches the cells you entered. Check them or tap “UNDO”.",
+    err_conflict: v => `The cells circled in red (${v.list}) don't fit with the rest. Check them or tap “UNDO”. Meanwhile, here is the most likely cell.`,
+    vanishNote: "The “!” next to the reward have been cleared, as in the game. If one is still shown in the game, tap it here: it's a valuable clue.",
+    calc: "Calculating…",
+    doneKicker: "Done", doneHead: "All 3 rewards found",
+    doneHelp: "Tap “RESTART” for a new panel.",
+    playKicker: "Next click in the game",
+    playHead: v => `Cell <em>${v.c}</em> · row ${v.r}, hex ${v.h}`,
+    chipProb: v => `<b>${v.p}</b> chance it's a reward`,
+    chipLeft: v => `About <b>${v.n}</b> clicks left`,
+    chipGifts: v => `Rewards <b>${v.f}/3</b>`,
+    chipCertain: v => `Certain reward: <b>${v.list}</b>`,
+    playHelp: "Click this cell in the game, then tap it here: it and its neighbours turn black. " +
+      "Then tap each black cell to copy what the game shows: <strong>empty → ! → reward</strong>. " +
+      "If the clicked cell shows “!” or a reward, its neighbours turn gold again, just like in the game. " +
+      "If a cell revealed as a neighbour shows “!” in the game, tap it to mark it.",
+  },
+};
+let lang = (() => {
+  const s = store.get("blackcrest-lang"); if (I18N[s]) return s;
+  const n = (navigator.language || "fr").slice(0, 2).toLowerCase();
+  return I18N[n] ? n : "fr";
+})();
+const T = (key, v = {}) => { const s = I18N[lang][key]; return typeof s === "function" ? s(v) : s; };
+const pct = p => Math.round(p * 100) + (lang === "en" ? "%" : " %");
+const num = x => x.toFixed(1).replace(".", lang === "en" ? "." : ",");
+function applyStatic() {
+  document.documentElement.lang = lang;
+  document.getElementById("version").textContent = `${T("version")} ${APP_VERSION}`;
+  document.querySelectorAll("[data-i18n]").forEach(e => { e.textContent = T(e.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-aria]").forEach(e => { e.setAttribute("aria-label", T(e.dataset.i18nAria)); });
+  document.querySelectorAll(".flag").forEach(b => b.setAttribute("aria-pressed", b.dataset.lang === lang));
+  const hb = document.getElementById("helpBtn");
+  if (hb && typeof TUTO !== "undefined") { hb.setAttribute("aria-label", TUTO[lang].help); hb.title = TUTO[lang].help; }
+  if (typeof renderStats === "function" && document.getElementById("statLabel")) renderStats();
+}
+function setLang(l) {
+  lang = l;
+  store.set("blackcrest-lang", l);
+  applyStatic();
+  refresh();
+  if (tut) { tut.pages = tutorialPages(tut.seen); showStep(tut.step); }
+}
+document.querySelectorAll(".flag").forEach(b => b.addEventListener("click", () => setLang(b.dataset.lang)));
+
+document.getElementById("start").addEventListener("click", start);
+document.getElementById("undo").addEventListener("click", undo);
+document.getElementById("reset").addEventListener("click", () => (celebration ? finishCelebration() : reset()));
+
+// ---------- Statistique : décodeurs utilisés par panneau résolu ----------
+let stats = (() => { try { const d = JSON.parse(store.get("blackcrest-stats")); if (d && d.p >= 0 && d.d >= 0) return d; } catch (e) {} return { p: 0, d: 0 }; })();
+let resetArmed = 0;
+function renderStats() {
+  document.getElementById("statLabel").textContent = T("statLabel");
+  document.getElementById("statValue").textContent = stats.p ? num(stats.d / stats.p) : "–";
+  document.getElementById("statCount").textContent = stats.p ? T("statCount", stats) : T("statNone");
+  document.getElementById("statReset").textContent = resetArmed ? T("statConfirm") : T("statReset");
+}
+document.getElementById("statReset").addEventListener("click", () => {
+  if (!resetArmed) {
+    // 2 temps pour éviter une remise à zéro par erreur
+    resetArmed = setTimeout(() => { resetArmed = 0; renderStats(); }, 3000);
+  } else {
+    clearTimeout(resetArmed); resetArmed = 0;
+    stats = { p: 0, d: 0 };
+    store.set("blackcrest-stats", JSON.stringify(stats));
+  }
+  renderStats();
+});
+
+// ---------- Fin de panneau : texte 3D puis panneau vierge ----------
+// Le « Bravo » attend un peu : on voit la 3e récompense se retourner, et on peut
+// encore toucher le panneau pour corriger une erreur (ce qui annule le « Bravo »).
+const BRAVO_DELAY = 2000;
+let bravoWait = 0;
+function scheduleCelebrate() {
+  clearTimeout(bravoWait);
+  bravoWait = setTimeout(() => {
+    bravoWait = 0;
+    if (phase === "play" && !pending.length && !asking.length && states.filter(s => s === GIFT).length === N_GIFTS) celebrate();
+  }, BRAVO_DELAY);
+}
+function cancelScheduledCelebrate() { clearTimeout(bravoWait); bravoWait = 0; }
+let celebration = 0;
+function celebrate() {
+  if (celebration || demoActive()) return;
+  const box = document.querySelector(".board");
+  const div = document.createElement("div");
+  div.className = "bravo";
+  div.setAttribute("role", "status");
+  const span = document.createElement("span");
+  span.textContent = T("bravo");
+  div.appendChild(span);
+  box.appendChild(div);
+  const hint = document.createElement("small");
+  hint.textContent = T("bravoHint");
+  div.appendChild(hint);
+  celebration = setTimeout(finishCelebration, 4000);
+}
+function finishCelebration() {
+  if (!celebration) return;
+  clearTimeout(celebration); celebration = 0;
+  stats = { p: stats.p + 1, d: stats.d + tick };
+  store.set("blackcrest-stats", JSON.stringify(stats));
+  renderStats();
+  const b = document.querySelector(".bravo"); if (b) b.remove();
+  history = [];
+  reset();
+}
+function cancelCelebration() {
+  if (!celebration) return;
+  clearTimeout(celebration); celebration = 0;
+  const b = document.querySelector(".bravo"); if (b) b.remove();
+}
+
+// ---------- Démonstrations animées du tutoriel ----------
+// Elles se jouent sur un panneau vierge ; la partie en cours est mise de côté
+// puis restaurée à l'identique quand on quitte la démonstration ou le tutoriel.
+let demoSaved = null, demoTimers = [], demoTap = -1;
+const demoActive = () => demoSaved !== null;
+const cellOf = l => CELLS.findIndex((c, i) => label(i) === l);
+function demoSave() {
+  if (demoSaved) return;
+  cancelScheduledCelebrate();
+  cancelAsk();
+  demoSaved = { states: states.slice(), phase, origin: origin.slice(), at: at.slice(), tick, vanished: vanished.slice(),
+    vanishedBy: vanishedBy.slice(), pending: pending.slice(), asking: asking.slice(), history: history.slice(), note, autoFilled: autoFilled.slice(), lastTap };
+  calcId++; // un calcul en cours ne doit pas écraser la démonstration
+}
+function demoBlank() {
+  states = CELLS.map(() => GOLD);
+  states[cellOf("2-2")] = BLOCKED; states[cellOf("4-8")] = BLOCKED;
+  phase = "play"; origin = CELLS.map(() => -1); vanished = CELLS.map(() => 0); pending = []; asking = []; res = null;
+}
+function demoStop() { demoTimers.forEach(clearTimeout); demoTimers = []; demoTap = -1; document.querySelectorAll(".tut-press").forEach(b => b.classList.remove("tut-press")); }
+function demoRestore() {
+  demoStop();
+  if (!demoSaved) return;
+  const d = demoSaved; demoSaved = null;
+  ({ states, phase, tick, note, lastTap } = d);
+  origin = d.origin; at = d.at; vanished = d.vanished; vanishedBy = d.vanishedBy; pending = d.pending; asking = d.asking; history = d.history; autoFilled = d.autoFilled;
+  shown = null; flipFrom = []; // pas de retournement à la restauration
+  refresh();
+}
+// Boutons présentés à l'étape 6 : INSTALLER seulement s'il est proposé,
+// l'explication iPhone si c'est elle qui est affichée, rien si l'outil est déjà installé.
+function buttonDemoSteps() {
+  const D = TUTO[lang].demo, steps = [["#undo", D.buttons[0]], ["#reset", D.buttons[1]]];
+  const ib = document.getElementById("install"), ih = document.getElementById("iosHint");
+  if (ib && !ib.hidden) steps.push(["#install", D.install]);
+  else if (ih && !ih.hidden) steps.push(["#iosHint", D.ios]);
+  steps.push(["#statReset", D.buttons[2]]);
+  return steps;
+}
+const demoLinesFor = kind => (kind === "buttons" ? buttonDemoSteps().map(x => x[1]) : TUTO[lang].demo[kind]);
+function demoLine(k) { document.querySelectorAll(".tut-demo li").forEach((li, j) => li.classList.toggle("on", j === k)); }
+function demoAt(ms, fn) { demoTimers.push(setTimeout(fn, ms)); }
+function demoTapOn(l, fn) { demoTap = cellOf(l); lastTap = demoTap; fn(); draw(); }
+
+function runDemo(kind) {
+  demoStop();
+  if (kind === "buttons") {
+    const press = (sel, ms, line) => demoAt(ms, () => {
+      document.querySelectorAll(".tut-press").forEach(b => b.classList.remove("tut-press"));
+      demoLine(line);
+      const b = sel && document.querySelector(sel); if (b) b.classList.add("tut-press");
+    });
+    const steps = buttonDemoSteps();
+    steps.forEach(([sel], k) => press(sel, 300 + 1500 * k, k));
+    demoAt(300 + 1500 * steps.length + 500, () => runDemo(kind));
+    return;
+  }
+  demoSave();
+  if (kind === "report") {
+    demoBlank(); lastTap = -1; demoTap = -1; draw(); demoLine(0);
+    demoAt(900, () => { demoTapOn("3-4", () => { for (const j of [cellOf("3-4"), ...NB[cellOf("3-4")]]) if (states[j] === GOLD) states[j] = EMPTY; }); demoLine(1); });
+    demoAt(1900, () => { demoTapOn("3-4", () => { states[cellOf("3-4")] = ALERT; }); demoLine(2); });
+    demoAt(2900, () => { demoTapOn("3-4", () => { states[cellOf("3-4")] = GIFT; }); demoLine(3); });
+    demoAt(5200, () => runDemo(kind));
+  } else if (kind === "after") {
+    demoBlank(); lastTap = -1; demoTap = -1;
+    states[cellOf("2-4")] = ALERT; states[cellOf("4-5")] = ALERT;
+    draw(); demoLine(0);
+    demoAt(900, () => { demoTapOn("3-4", () => { states[cellOf("3-4")] = GIFT; }); demoLine(0); });
+    demoAt(1900, () => { demoTap = -1; lastTap = -1; for (const l of ["2-4", "4-5"]) { states[cellOf(l)] = EMPTY; pending.push(cellOf(l)); asking.push(cellOf(l)); } draw(); demoLine(1); });
+    demoAt(3100, () => { demoTapOn("2-4", () => { pending = pending.filter(j => j !== cellOf("2-4")); states[cellOf("2-4")] = ALERT; }); demoLine(2); });
+    demoAt(4300, () => { demoTapOn("4-5", () => { pending = []; states[cellOf("4-5")] = EMPTY; }); demoLine(3); });
+    demoAt(5500, () => { asking = []; draw(); });
+    demoAt(6400, () => runDemo(kind));
+  }
+}
+
+// ---------- Tutoriel interactif ----------
+// S'ouvre tout seul quand une version plus récente que la dernière vue est déployée,
+// commence par les nouveautés, puis présente chaque zone de l'outil.
+// Le bouton « ? » le rouvre à tout moment.
+const CHANGELOG = [
+  { v: "1.20", fr: ["Après une récompense, vous pouvez aussi toucher directement les cases « !? » du panneau : « !? » → « ! » → vide. La saisie est validée 2 secondes après la dernière réponse."],
+    es: ["Tras una recompensa, también puedes tocar directamente las casillas «!?» del panel: «!?» → «!» → vacía. Se valida 2 segundos después de la última respuesta."],
+    en: ["After a reward, you can also tap the “!?” cells on the panel directly: “!?” → “!” → empty. Your answers are confirmed 2 seconds after the last one."] },
+  { v: "1.19", fr: ["Le « Bravo » attend 2 secondes : on voit la 3ᵉ récompense, et on peut encore corriger une erreur en touchant le panneau."],
+    es: ["El «Bravo» espera 2 segundos: se ve la 3.ª recompensa y aún se puede corregir un error tocando el panel."],
+    en: ["The “Well done” message waits 2 seconds: you see the 3rd reward, and can still fix a mistake by tapping the panel."] },
+  { v: "1.18", fr: ["Le « Bravo » reste 4 secondes et rappelle comment annuler si la dernière case n'était pas la bonne."],
+    es: ["El «Bravo» dura 4 segundos y recuerda cómo deshacer si la última casilla no era la buena."],
+    en: ["The “Well done” message stays for 4 seconds and reminds you how to undo if the last cell was wrong."] },
+  { v: "1.17", fr: ["Le tutoriel montre maintenant des démonstrations animées.", "Texte « Bravo » en 3D quand les 3 récompenses sont trouvées, puis nouveau panneau.", "Nouvelle statistique : nombre moyen de décodeurs utilisés par panneau, avec un bouton RESET.", "« Grille » devient « panneau »."],
+    es: ["El tutorial muestra ahora demostraciones animadas.", "Texto «Bravo» en 3D al encontrar las 3 recompensas, y luego panel nuevo.", "Nueva estadística: media de decodificadores usados por panel, con un botón RESET.", "«Cuadrícula» pasa a ser «panel»."],
+    en: ["The tutorial now shows animated demos.", "A 3D “Well done” message when all 3 rewards are found, then a new panel.", "New statistic: average decoders used per panel, with a RESET button.", "“Grid” is now “panel”."] },
+  { v: "1.16", fr: ["Ce tutoriel interactif, et le bouton « ? » pour le revoir à tout moment."],
+    es: ["Este tutorial interactivo y el botón «?» para volver a verlo cuando quieras."],
+    en: ["This interactive tutorial, and the “?” button to replay it at any time."] },
+  { v: "1.15", fr: ["La 2ᵉ case ✕ se place toute seule : le jeu la met toujours à l'opposé de la 1ʳᵉ.",
+                    "Après une récompense, l'outil demande quels « ! » voisins restent affichés, et répond seul quand c'est certain."],
+    es: ["La 2.ª casilla ✕ se coloca sola: el juego siempre la pone en el lado opuesto de la 1.ª.",
+         "Tras una recompensa, la herramienta pregunta qué «!» vecinos siguen apareciendo, y responde sola cuando es seguro."],
+    en: ["The 2nd ✕ cell is placed automatically: the game always puts it opposite the 1st.",
+         "After a reward, the tool asks which neighbouring “!” are still shown, and answers by itself when it's certain."] },
+  { v: "1.14", fr: ["Nouvelle disposition : drapeaux à côté du titre, bouton Installer à droite.", "« Cadeau » devient « Récompense »."],
+    es: ["Nueva disposición: banderas junto al título y botón Instalar a la derecha.", "«Regalo» pasa a ser «Recompensa»."],
+    en: ["New layout: flags next to the title, Install button on the right.", "“Gift” is now “Reward”."] },
+  { v: "1.13", fr: ["Retournement des cases plus fluide, sur un axe incliné à 45°, avec un reflet lumineux."],
+    es: ["Volteo de casillas más fluido, sobre un eje inclinado a 45°, con un reflejo de luz."],
+    en: ["Smoother cell flips, around a 45° axis, with a light glint."] },
+  { v: "1.10", fr: ["Nouvelle adresse : blackcrest.gauntlet-manager.com."],
+    es: ["Nueva dirección: blackcrest.gauntlet-manager.com."],
+    en: ["New address: blackcrest.gauntlet-manager.com."] },
+  { v: "1.9", fr: ["L'outil s'installe comme une application et marche hors connexion."],
+    es: ["La herramienta se instala como una aplicación y funciona sin conexión."],
+    en: ["The tool installs like an app and works offline."] },
+  { v: "1.8", fr: ["Calcul sur plusieurs clics à l'avance, « ! » qui s'effacent pris en compte, cases incohérentes entourées en rouge."],
+    es: ["Cálculo de varios clics por adelantado, «!» que se borran tenidos en cuenta, casillas incoherentes rodeadas en rojo."],
+    en: ["Looks several clicks ahead, handles “!” that clear, and circles inconsistent cells in red."] },
+];
+const TUTO = {
+  fr: {
+    next: "Suivant", prev: "Précédent", skip: "Ignorer", done: "Terminer", help: "Aide : revoir le tutoriel",
+    newTitle: v => `Nouveautés de la version ${v}`, newSince: v => `Dernières évolutions depuis la version ${v} :`, latest: "Dernières évolutions :",
+    welcomeTitle: "Bienvenue dans Blackcrest Solver",
+    welcomeBody: "L'outil vous indique quelle case ouvrir pour trouver les 3 récompenses d'un panneau avec le moins de décodeurs possible. Ce petit tour vous montre comment l'utiliser.",
+    steps: [
+      ["Le panneau", "C'est la copie du panneau du jeu. Au départ, touchez une des 2 cases barrées (✕) du jeu : l'autre se place toute seule."],
+      ["Le conseil", "Il indique la case à ouvrir, entourée en bleu sur le panneau, avec la chance qu'elle cache une récompense et le nombre de clics restants estimé."],
+      ["Reporter ce que montre le jeu", "Démonstration sur un panneau vierge (le vôtre revient à la fin du tutoriel) :"],
+      ["Après une récompense", "Les « ! » qui touchent une récompense trouvée peuvent s'effacer dans le jeu. L'outil vous demande lesquels restent : c'est l'indice qui fait gagner le plus de décodeurs."],
+      ["Les boutons et la statistique", "La partie est sauvegardée toute seule : vous la retrouvez en revenant."],
+      ["Langue et aide", "Changez de langue avec les drapeaux. Le bouton « ? » relance ce tutoriel quand vous voulez."],
+    ],
+    demo: {
+      report: ["Vous ouvrez la case dans le jeu, puis vous la touchez ici.", "Elle et ses voisines deviennent noires.", "Le jeu affiche « ! » : touchez-la une 2ᵉ fois.", "Le jeu affiche une récompense : touchez-la une 3ᵉ fois."],
+      after: ["Une récompense est trouvée.", "Ses « ! » voisins passent en « !? » : à confirmer.", "Toujours affiché dans le jeu → « TOUJOURS « ! » ».", "Effacé dans le jeu → « EFFACÉ »."],
+      install: "INSTALLER ajoute l'outil sur votre écran d'accueil, comme une application (il marche aussi hors connexion).",
+      ios: "Sur iPhone : bouton Partager, puis « Sur l'écran d'accueil » pour l'installer comme une application.",
+      buttons: ["ANNULER pour revenir en arrière d'un coup.", "RECOMMENCER repart d'un panneau vierge.", "En bas : la moyenne de décodeurs par panneau résolu. RESET la remet à zéro."],
+    },
+  },
+  es: {
+    next: "Siguiente", prev: "Anterior", skip: "Omitir", done: "Terminar", help: "Ayuda: volver a ver el tutorial",
+    newTitle: v => `Novedades de la versión ${v}`, newSince: v => `Últimas novedades desde la versión ${v}:`, latest: "Últimas novedades:",
+    welcomeTitle: "Bienvenido a Blackcrest Solver",
+    welcomeBody: "La herramienta te indica qué casilla abrir para encontrar las 3 recompensas de un panel con el menor número de decodificadores. Este breve recorrido te enseña a usarla.",
+    steps: [
+      ["El panel", "Es la copia del panel del juego. Al empezar, toca una de las 2 casillas tachadas (✕) del juego: la otra se coloca sola."],
+      ["El consejo", "Indica la casilla que abrir, rodeada en azul en el panel, con la probabilidad de que esconda una recompensa y los clics restantes estimados."],
+      ["Copiar lo que muestra el juego", "Demostración en un panel vacío (el tuyo vuelve al final del tutorial):"],
+      ["Tras una recompensa", "Los «!» que tocan una recompensa encontrada pueden borrarse en el juego. La herramienta te pregunta cuáles siguen: es la pista que más decodificadores ahorra."],
+      ["Los botones y la estadística", "La partida se guarda sola: la recuperas al volver."],
+      ["Idioma y ayuda", "Cambia de idioma con las banderas. El botón «?» vuelve a abrir este tutorial cuando quieras."],
+    ],
+    demo: {
+      report: ["Abres la casilla en el juego y luego la tocas aquí.", "Ella y sus vecinas se vuelven negras.", "El juego muestra «!»: tócala una 2.ª vez.", "El juego muestra una recompensa: tócala una 3.ª vez."],
+      after: ["Se encuentra una recompensa.", "Sus «!» vecinos pasan a «!?»: hay que confirmarlos.", "Sigue apareciendo en el juego → «SIGUE «!»».", "Borrado en el juego → «BORRADO»."],
+      install: "INSTALAR añade la herramienta a tu pantalla de inicio, como una aplicación (también funciona sin conexión).",
+      ios: "En iPhone: botón Compartir y luego «Añadir a pantalla de inicio» para instalarla como una aplicación.",
+      buttons: ["DESHACER para volver atrás una jugada.", "REINICIAR empieza con un panel vacío.", "Abajo: la media de decodificadores por panel resuelto. RESET la pone a cero."],
+    },
+  },
+  en: {
+    next: "Next", prev: "Back", skip: "Skip", done: "Finish", help: "Help: replay the tutorial",
+    newTitle: v => `What's new in version ${v}`, newSince: v => `Latest changes since version ${v}:`, latest: "Latest changes:",
+    welcomeTitle: "Welcome to Blackcrest Solver",
+    welcomeBody: "The tool tells you which cell to open to find the 3 rewards of a panel with as few decoders as possible. This short tour shows you how to use it.",
+    steps: [
+      ["The panel", "It's a copy of the game's panel. To start, tap one of the 2 crossed-out cells (✕) from the game: the other one is placed automatically."],
+      ["The advice", "It shows the cell to open, circled in blue on the panel, with the chance that it hides a reward and the estimated clicks left."],
+      ["Copy what the game shows", "Demo on an empty panel (yours comes back when the tutorial ends):"],
+      ["After a reward", "The “!” touching a reward you found may clear in the game. The tool asks which ones remain: it's the clue that saves the most decoders."],
+      ["The buttons and the statistic", "Your game is saved automatically: it's still there when you come back."],
+      ["Language and help", "Change the language with the flags. The “?” button replays this tutorial whenever you like."],
+    ],
+    demo: {
+      report: ["You open the cell in the game, then tap it here.", "It and its neighbours turn black.", "The game shows “!”: tap it a 2nd time.", "The game shows a reward: tap it a 3rd time."],
+      after: ["A reward is found.", "Its neighbouring “!” turn into “!?”: to confirm.", "Still shown in the game → “STILL “!””.", "Cleared in the game → “CLEARED”."],
+      install: "INSTALL adds the tool to your home screen, like an app (it also works offline).",
+      ios: "On iPhone: tap Share, then “Add to Home Screen” to install it like an app.",
+      buttons: ["UNDO to go back one move.", "RESTART begins with an empty panel.", "At the bottom: the average decoders per solved panel. RESET sets it back to zero."],
+    },
+  },
+};
+const TUTO_TARGETS = [".board", "#panel", ".board", ".board", [".controls", "#iosHint", "#stats"], ".langs"];
+const TUTO_DEMOS = [null, null, "report", "after", "buttons", null];
+
+const vparts = v => String(v).split(".").map(Number);
+const newer = (a, b) => { const x = vparts(a), y = vparts(b); for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+
+let tut = null; // { step, pages, lastFocus }
+
+function tutorialPages(seen) {
+  const L = TUTO[lang];
+  const pages = [];
+  const news = CHANGELOG.filter(c => !seen || newer(c.v, seen));
+  if (seen && news.length) {
+    pages.push({ title: L.newTitle(APP_VERSION), intro: L.newSince(seen), list: news.flatMap(c => c[lang].map(t => [c.v, t])) });
+  } else {
+    pages.push({ title: L.welcomeTitle, body: L.welcomeBody, listTitle: L.latest, list: seen ? [] : CHANGELOG[0][lang].map(t => [CHANGELOG[0].v, t]) });
+  }
+  L.steps.forEach(([title, body], k) => pages.push({ title, body, target: TUTO_TARGETS[k], demo: TUTO_DEMOS[k] }));
+  return pages;
+}
+
+function openTutorial(seen) {
+  closeTutorial(false);
+  tut = { step: 0, seen, pages: tutorialPages(seen), lastFocus: document.activeElement };
+  const root = document.createElement("div");
+  root.id = "tuto";
+  root.innerHTML = `<div class="tut-shade"></div><div class="tut-spot" hidden></div>
+    <div class="tut-card" role="dialog" aria-modal="true" aria-labelledby="tutTitle" tabindex="-1">
+      <div class="tut-count" id="tutCount"></div>
+      <h2 id="tutTitle"></h2>
+      <div class="tut-body" id="tutBody"></div>
+      <div class="tut-actions">
+        <button type="button" id="tutSkip" class="tut-skip"></button>
+        <span class="tut-gap"></span>
+        <button type="button" id="tutPrev"></button>
+        <button type="button" id="tutNext" class="primary"></button>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelector("#tutSkip").addEventListener("click", () => closeTutorial(true));
+  root.querySelector("#tutPrev").addEventListener("click", () => showStep(tut.step - 1));
+  root.querySelector("#tutNext").addEventListener("click", () => (tut.step >= tut.pages.length - 1 ? closeTutorial(true) : showStep(tut.step + 1)));
+  root.addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.preventDefault(); closeTutorial(true); }
+    else if (e.key === "ArrowRight") showStep(Math.min(tut.step + 1, tut.pages.length - 1));
+    else if (e.key === "ArrowLeft") showStep(Math.max(tut.step - 1, 0));
+  });
+  showStep(0);
+}
+
+function showStep(k) {
+  if (!tut) return;
+  tut.step = Math.max(0, Math.min(k, tut.pages.length - 1));
+  const L = TUTO[lang], p = tut.pages[tut.step], root = document.getElementById("tuto");
+  root.querySelector("#tutCount").textContent = `${tut.step + 1} / ${tut.pages.length}`;
+  root.querySelector("#tutTitle").textContent = p.title;
+  const body = root.querySelector("#tutBody");
+  body.textContent = "";
+  if (p.intro) { const i = document.createElement("p"); i.textContent = p.intro; body.appendChild(i); }
+  if (p.body) { const b = document.createElement("p"); b.textContent = p.body; body.appendChild(b); }
+  if (p.list && p.list.length) {
+    if (p.listTitle) { const h = document.createElement("p"); h.className = "tut-list-title"; h.textContent = p.listTitle; body.appendChild(h); }
+    const ul = document.createElement("ul");
+    for (const [v, t] of p.list) {
+      const li = document.createElement("li");
+      const tag = document.createElement("span"); tag.className = "tut-ver"; tag.textContent = v;
+      li.append(tag, document.createTextNode(t));
+      ul.appendChild(li);
+    }
+    body.appendChild(ul);
+  }
+  if (p.demo) {
+    const ol = document.createElement("ol");
+    ol.className = "tut-demo";
+    for (const t of demoLinesFor(p.demo)) { const li = document.createElement("li"); li.textContent = t; ol.appendChild(li); }
+    body.appendChild(ol);
+  }
+  root.querySelector("#tutSkip").textContent = L.skip;
+  root.querySelector("#tutSkip").hidden = tut.step === tut.pages.length - 1;
+  root.querySelector("#tutPrev").textContent = L.prev;
+  root.querySelector("#tutPrev").hidden = tut.step === 0;
+  root.querySelector("#tutNext").textContent = tut.step === tut.pages.length - 1 ? L.done : L.next;
+  const target = tutTargets(p)[0];
+  if (target) target.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
+  // démonstration de l'étape (la partie en cours est restaurée hors des démonstrations du panneau)
+  if (p.demo === "report" || p.demo === "after") runDemo(p.demo);
+  else { demoRestore(); if (p.demo) runDemo(p.demo); }
+  placeTutorial();
+  setTimeout(placeTutorial, 350); // après le défilement
+  root.querySelector(".tut-card").focus({ preventScroll: true });
+}
+
+// Place la zone mise en lumière et la carte (au-dessus ou en dessous de la zone).
+function placeTutorial() {
+  if (!tut) return;
+  const root = document.getElementById("tuto"), p = tut.pages[tut.step];
+  const spot = root.querySelector(".tut-spot"), shade = root.querySelector(".tut-shade"), card = root.querySelector(".tut-card");
+  const targets = tutTargets(p);
+  const target = targets[0];
+  const vw = window.innerWidth, vh = window.innerHeight;
+  card.style.top = card.style.bottom = "";
+  if (!target) {
+    spot.hidden = true; shade.hidden = false;
+    card.classList.add("centered");
+    return;
+  }
+  card.classList.remove("centered");
+  const rs = targets.map(t => t.getBoundingClientRect());
+  const r = { left: Math.min(...rs.map(x => x.left)), top: Math.min(...rs.map(x => x.top)), right: Math.max(...rs.map(x => x.right)), bottom: Math.max(...rs.map(x => x.bottom)) };
+  r.width = r.right - r.left; r.height = r.bottom - r.top;
+  const pad = 6;
+  spot.hidden = false; shade.hidden = true;
+  Object.assign(spot.style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
+  const ch = card.offsetHeight, below = vh - r.bottom, above = r.top;
+  if (below >= ch + 24 || below >= above) card.style.top = `${Math.min(r.bottom + 16, vh - ch - 12)}px`;
+  else card.style.top = `${Math.max(12, r.top - ch - 16)}px`;
+  void vw;
+}
+
+const tutTargets = p => (p.target ? [].concat(p.target).map(sel => document.querySelector(sel)).filter(e => e && e.getClientRects().length) : []);
+function closeTutorial(markSeen) {
+  demoRestore();
+  const root = document.getElementById("tuto");
+  if (root) root.remove();
+  if (markSeen) store.set("blackcrest-seen", APP_VERSION);
+  if (tut && tut.lastFocus && tut.lastFocus.focus) tut.lastFocus.focus({ preventScroll: true });
+  tut = null;
+}
+
+// mémorisé avant le premier dessin, qui crée lui-même une sauvegarde
+const HAD_SAVED_GRID = !!store.get("blackcrest-grid");
+function maybeStartTutorial() {
+  const seen = store.get("blackcrest-seen");
+  if (seen === APP_VERSION) return;
+  // une personne qui avait déjà une partie sauvegardée a connu une version antérieure
+  const before = seen || (HAD_SAVED_GRID ? "1.13" : null);
+  openTutorial(before);
+}
+
+window.addEventListener("resize", placeTutorial);
+window.addEventListener("scroll", placeTutorial, { passive: true });
+document.getElementById("helpBtn").addEventListener("click", () => openTutorial(store.get("blackcrest-seen") === APP_VERSION ? null : store.get("blackcrest-seen")));
+
+function boot(saved) {
+  applyStatic();
+  if (saved && saved.states) { states = saved.states; phase = saved.phase; history = saved.history || []; origin = saved.origin || CELLS.map(() => -1); at = saved.at || CELLS.map(() => -1); tick = saved.tick || 0; vanished = saved.vanished || CELLS.map(() => 0); vanishedBy = saved.vanishedBy || CELLS.map(() => -1); refresh(); }
+  else if (loadGrid()) refresh();
+  else reset();
+  setTimeout(maybeStartTutorial, 500);
+}
+
+boot({});
+
+// ---------- Application installable ----------
+// Le service worker est enregistré pour le dossier de la page uniquement.
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js", { scope: "./" }).catch(() => {});
+  });
+}
+let installEvent = null;
+const installBtn = document.getElementById("install");
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  installEvent = e;
+  installBtn.hidden = false;
+});
+installBtn.addEventListener("click", async () => {
+  if (!installEvent) return;
+  installEvent.prompt();
+  try { await installEvent.userChoice; } catch (e) {}
+  installEvent = null;
+  installBtn.hidden = true;
+});
+window.addEventListener("appinstalled", () => { installBtn.hidden = true; });
+(() => {
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  document.getElementById("iosHint").hidden = !(ios && !standalone);
+})();
+</script>
+</body>
+</html>
