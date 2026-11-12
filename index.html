@@ -570,19 +570,20 @@ function act(i) {
     // donc qu'elle révèle aussi ses voisines dorées
     push();
     tick++;
-    for (const j of [i, ...NB[i]]) if (states[j] === GOLD) { states[j] = EMPTY; origin[j] = i; at[j] = tick; }
+    if (res && !res.error && res.probs[i] === 1) {
+      // récompense certaine (100 %) : elle apparaît dès le 1er toucher
+      states[i] = GIFT; origin[i] = i; at[i] = tick; vanished[i] = 0;
+      giftFound(i);
+    } else {
+      for (const j of [i, ...NB[i]]) if (states[j] === GOLD) { states[j] = EMPTY; origin[j] = i; at[j] = tick; }
+    }
   } else if (CYCLE[s]) {
     push();
     const next = CYCLE[s];
     states[i] = next;
     vanished[i] = 0;
     if (next === GIFT) {
-      // les « ! » voisins d'une récompense trouvée peuvent s'effacer dans le jeu :
-      // on demande lesquels restent (sauf quand la réponse est certaine)
-      for (const j of NB[i]) if (states[j] === ALERT) { states[j] = EMPTY; vanished[j] = 0; vanishedBy[j] = i; pending.push(j); }
-      asking = pending.slice();
-      autoResolve();
-      if (!pending.length) asking = []; // tout était certain : pas de question
+      giftFound(i);
     } else if (s === GIFT) {
       for (const j of NB[i]) if (vanishedBy[j] === i && states[j] === EMPTY) { states[j] = ALERT; vanished[j] = 0; vanishedBy[j] = -1; }
     }
@@ -597,6 +598,15 @@ function act(i) {
     }
   } else return;
   refresh();
+}
+
+// Récompense trouvée en i : les « ! » voisins peuvent s'effacer dans le jeu,
+// on demande lesquels restent (sauf quand la réponse est certaine).
+function giftFound(i) {
+  for (const j of NB[i]) if (states[j] === ALERT) { states[j] = EMPTY; vanished[j] = 0; vanishedBy[j] = i; pending.push(j); }
+  asking = pending.slice();
+  autoResolve();
+  if (!pending.length) asking = []; // tout était certain : pas de question
 }
 
 // Réponse à la question « ce ! est-il toujours affiché ? » (boutons du panneau de conseil)
@@ -955,7 +965,7 @@ function loadGrid() {
 }
 
 // ---------- Langues ----------
-const APP_VERSION = "1.20";
+const APP_VERSION = "1.21";
 const I18N = {
   fr: {
     steps: "Étapes", step1: "1 · Cases ✕", step2: "2 · Recherche",
@@ -1257,6 +1267,9 @@ function runDemo(kind) {
 // commence par les nouveautés, puis présente chaque zone de l'outil.
 // Le bouton « ? » le rouvre à tout moment.
 const CHANGELOG = [
+  { v: "1.21", fr: ["Une case à 100 % devient une récompense dès le 1er toucher."],
+    es: ["Una casilla al 100 % se convierte en recompensa al primer toque."],
+    en: ["A cell at 100% turns into a reward on the first tap."] },
   { v: "1.20", fr: ["Après une récompense, vous pouvez aussi toucher directement les cases « !? » du panneau : « !? » → « ! » → vide. La saisie est validée 2 secondes après la dernière réponse."],
     es: ["Tras una recompensa, también puedes tocar directamente las casillas «!?» del panel: «!?» → «!» → vacía. Se valida 2 segundos después de la última respuesta."],
     en: ["After a reward, you can also tap the “!?” cells on the panel directly: “!?” → “!” → empty. Your answers are confirmed 2 seconds after the last one."] },

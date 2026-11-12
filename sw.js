@@ -1,6 +1,6 @@
 // Service worker de Blackcrest Solver.
 // Il ne contrôle que les pages de son dossier et ne supprime que ses propres caches.
-const VERSION = "1.20.1";
+const VERSION = "1.21";
 const CACHE = "blackcrest-solver-" + VERSION;
 const PREFIX = "blackcrest-solver-";
 const CORE = [
